@@ -1,13 +1,17 @@
-# GCP - GKE - istio - ASM
+# GCP - GKE - istio - ASM - Internal Load Balancer
 
 
 # Background
 
 As you can see the below, we want the asm of cluster is able to communicate each other for using istio-ingressgateway in peering network in GCP.
-![image1](https://storage.googleapis.com/github-image-bucket/istio-1.jpeg)
 
 # Prerequisites
 We recommend you to use [cloud shell](https://cloud.google.com/shell/docs/launching-cloud-shell) for next steps.
+
+Get the ip of cloud shell instance
+```bash
+curl -s checkip.dyndns.org | sed -e 's/.*Current IP Address: //' -e 's/<.*$//'
+```
 
 Download asmcli
 ```bash
@@ -30,93 +34,27 @@ export CLUSTER_2=CLUSTER_NAME_2
 export CTX_2="gke_${PROJECT_2}_${LOCATION_2}_${CLUSTER_2}"
 ```
 # Before you begin
-
-## Install in Cluster 1
-Configure kubectl to point to the cluster
+Optional: Configure kubectl to point to the cluster
 ```bash
 gcloud container clusters get-credentials CLUSTER_NAME \
      --zone CLUSTER_LOCATION \
      --project PROJECT_ID
 ```
-1. Enable APIs
+# Deploy hello world and istio with Internal Load Balancer
+Install istio in Cluster 1
 ```bash
-  gcloud services enable mesh.googleapis.com \
-      --project=FLEET_PROJECT_ID
+istioctl install -y  -f istio-operator.yaml
 ```
-2. Enable the Anthos Service Mesh fleet feature
+Create an Istio Gateway:
 ```bash
-gcloud container fleet mesh enable --project FLEET_PROJECT_ID 
-```
-3. Register a GKE cluster using Workload Identity to a fleet:
-```bash
- # For getting gke uri
- gcloud container clusters list --uri
- 
- gcloud container fleet memberships register NAME \
-  --gke-uri=https://container.googleapis.com/v1/projects/PROJECT/zones/zones/clusters/clusters\
-  --enable-workload-identity \
-  --project PROJECT_ID
-```
-4. Verify your cluster is registered:
-```bash
-gcloud container fleet memberships list --project FLEET_PROJECT_ID
-```
-# Install with asmcli
-
-```bash
-./asmcli install \
-  --project_id PROJECT_ID \
-  --cluster_name CLUSTER_NAME \
-  --cluster_location CLUSTER_LOCATION \
-  --fleet_id FLEET_ID \
-  --enable_all \
-  --ca mesh_ca
-```
-
-
-# Deploy hello world 
-Create the HelloWorld service in both clusters:
-```bash
-kubectl create --context=${CTX_1} \
-    -f ${SAMPLES_DIR}/samples/helloworld/helloworld.yaml \
-    -l service=helloworld -n sample
-```
-```bash
-kubectl create --context=${CTX_2} \
-    -f ${SAMPLES_DIR}/samples/helloworld/helloworld.yaml \
-    -l service=helloworld -n sample
-```
-
-Deploy HelloWorld v1 and v2 to each cluster
-```bash
-kubectl create --context=${CTX_1} \
-  -f ${SAMPLES_DIR}/samples/helloworld/helloworld.yaml \
-  -l version=v1 -n sample
-```
-```bash
-kubectl create --context=${CTX_2} \
-  -f ${SAMPLES_DIR}/samples/helloworld/helloworld.yaml \
-  -l version=v2 -n sample
-```
-# Deploy the Sleep service for curl in pod
-```bash
-for CTX in ${CTX_1} ${CTX_2}
-do
-    kubectl apply --context=${CTX} \
-        -f ${SAMPLES_DIR}/samples/sleep/sleep.yaml -n sample
-done
-```
-
-# Deploy Internal Load Balancer
-```bash
-kubectl apply -f - <<EOF
+kubectl apply  -f - <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: Gateway
 metadata:
   name: httpbin-gateway
 spec:
   selector:
-    istio: ingressgateway
+    istio: ingressgateway # use Istio default gateway implementation
   servers:
   - port:
       number: 80
@@ -126,8 +64,9 @@ spec:
     - "httpbin.example.com"
 EOF
 ```
+Configure routes for traffic entering via the Gateway:
 ```bash
-kubectl apply -f - <<EOF
+kubectl apply  -f  - <<EOF
 apiVersion: networking.istio.io/v1alpha3
 kind: VirtualService
 metadata:
@@ -140,32 +79,161 @@ spec:
   http:
   - match:
     - uri:
-        prefix: /status
-    - uri:
-        prefix: /delay
+        prefix: /hello
     route:
     - destination:
         port:
-          number: 8000
-        host: httpbin
-	
+          number: 5000
+        host: helloworld
 EOF
 ```
 ```bash
-kubectl apply -f istio-ilb-dev.yaml
-kubectl apply -f istio-ilb-svc.yaml
+kubectl label namespace NAMESPACE istio-injection=enabled
+```
+### Firewall setting with port 15000-15100 in Control plane address range
+Create the HelloWorld service:
+```bash
+kubectl create \
+    -f samples/helloworld/helloworld.yaml \
+    -l service=helloworld 
+```
+Deploy HelloWorld v1
+```bash
+kubectl create  \
+  -f samples/helloworld/helloworld.yaml \
+  -l version=v1 
+```
+Deploy the Sleep service for curl in pod
+```bash
+ kubectl apply  -f samples/sleep/sleep.yaml
+```
+Verify the internal load balancing.
+```bash
+kubectl exec -c sleep "$(kubectl get pod  -l app=sleep -o jsonpath='{.items[0].metadata.name}')" -- /bin/sh -c 'for i in $(seq 1 1); do curl -s -I -HHost:httpbin.example.com "http://IP:PORT/hello"; done'
+```
+Analyze Istio configuration and print validation messages
+```bash
+istioctl analyze
+```
+
+## Install ASM
+1. Enable APIs
+```bash
+  gcloud services enable mesh.googleapis.com \
+      --project=FLEET_PROJECT_ID
+```
+2. Enable the Anthos Service Mesh fleet feature
+```bash
+gcloud container fleet mesh enable --project FLEET_PROJECT_ID 
+```
+3. Register a GKE cluster using Workload Identity to a fleet:
+```bash
+ # For getting gke uri
+ gcloud container clusters list --uri --project PROJECT_ID
+ 
+ gcloud container fleet memberships register NAME \
+  --gke-uri=https://container.googleapis.com/v1/projects/PROJECT/zones/zones/clusters/clusters\
+  --enable-workload-identity \
+  --project PROJECT_ID
+```
+4. Verify your cluster is registered:
+```bash
+gcloud container fleet memberships list --project FLEET_PROJECT_ID
+```
+# Install with asmcli
+```bash
+./asmcli install \
+  --project_id PROJECT_ID \
+  --cluster_name CLUSTER_NAME \
+  --cluster_location CLUSTER_LOCATION \
+  --fleet_id FLEET_ID \
+  --enable_all \
+  --ca mesh_ca
+  
 ```
 
 # Testing
 
 In pod
 ```bash
-kubectl exec --context="${CTX_1}" -n sample -c sleep \
-    "$(kubectl get pod --context="${CTX_1}" -n sample -l \
+kubectl exec --context="${CTX_1}" -n default -c sleep \
+    "$(kubectl get pod --context="${CTX_1}" -n default -l \
     app=sleep -o jsonpath='{.items[0].metadata.name}')" \
-    -- /bin/sh -c 'for i in $(seq 1 1); do curl -s -I -HHost:httpbin.example.com "http://$INGRESS_HOST:$INGRESS_PORT/status/200"; done'
+    -- /bin/sh -c 'for i in $(seq 1 1); do curl -v -s -I -HHost:httpbin.example.com "http://192.168.0.28:80/hello"; done'
 ```
+
 In VM 
 ```bash
-curl -s -I -HHost:httpbin.example.com "http://$INGRESS_HOST:$INGRESS_PORT/status/200"
+curl -s -I -HHost:httpbin.example.com "http://192.168.0.28:80/hello;"
 ```
+
+# Error
+```bash
+Error:
+Internal error occurred: failed calling webhook "rev.namespace.sidecar-injector.istio.io": failed to call webhook: Post "https://istiod-asm-1152-6.istio-system.svc:443/inject?timeout=10s": context deadline exceeded
+
+
+Solution:
+Firewall role on control plane address range	
+15000-15100
+```
+
+```bash
+Error:
+pods "istio-ingressgateway-5b648874cc-" is forbidden: error looking up service account asm-1152-6/user-ingressgateway-service-account: serviceaccount "user-ingressgateway-service-account" not found
+
+
+
+
+Solution:
+kubectl create namespace GATEWAY_NAMESPACE
+kubectl create serviceaccount istio-ingressgateway-service-account \
+    --namespace istio-system
+```
+```bash
+Error:
+Istiod encountered an error: failed to wait for resource: resources not ready after 5m0s: timed out waiting for the condition
+	 
+
+
+Solution:
+Does not have minimum availability, there is not sufficient RAM or CPU to do the install
+
+```
+```bash
+Error: 
+asmcli: Installing ASM control plane...
+Failed 
+
+
+
+
+Solution:
+Check your VPC route. is there any 0.0.0.0/0 default internet?
+```
+```bash
+Error: ImagePullBackOff and Error: ErrImagePull errors with GKE
+
+
+
+Solution:
+has private nodes (aka no Public IP's)
+There is no Cloud NAT for the region of that cluster
+You don't have Private Access enabled on the subnet/vpc
+
+```
+
+# References
+
+## Istio
+https://istio.io/latest/docs/setup/install/istioctl/
+
+https://istio.io/latest/docs/tasks/traffic-management/ingress/ingress-control/
+
+## GCP
+https://cloud.google.com/service-mesh/docs/unified-install/install-anthos-service-mesh
+
+https://cloud.google.com/service-mesh/docs/unified-install/gke-install-multi-cluster#verify_cross-cluster_load_balancing
+
+
+

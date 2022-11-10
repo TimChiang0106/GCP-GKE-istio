@@ -1,0 +1,11 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  components:
+    ingressGateways:
+    - name: istio-ingressgateway
+      label:
+        istio: ingressgateway
+      k8s:
+        serviceAnnotations:
+          networking.gke.io/load-balancer-type: Internal
