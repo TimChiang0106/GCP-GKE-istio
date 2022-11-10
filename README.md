@@ -3,7 +3,7 @@
 
 # Background
 
-As you can see the below, we want the asm of cluster is able to communicate each other for using istio-ingressgateway in peering network in GCP.
+We want the asm of cluster is able to communicate each other for using istio-ingressgateway in peering network in GCP.
 
 # Prerequisites
 We recommend you to use [cloud shell](https://cloud.google.com/shell/docs/launching-cloud-shell) for next steps.
@@ -18,10 +18,11 @@ Download asmcli
 curl https://storage.googleapis.com/csm-artifacts/asm/asmcli_1.15 > asmcli
 chmod +x asmcli
 ```
-### 1. Create two cluster in two different project.
-### 2. Peering two VPC which cluster in.
-# 3. Setting project and cluster variables
-Create the following environment variables for the project ID, cluster zone or region, cluster name, and context. 
+# 1. Create two cluster in two different project.
+# 2. Peering two VPC which cluster in.
+
+# Before you begin
+Optional: Create the following environment variables for the project ID, cluster zone or region, cluster name, and context. 
 ```bash
 export PROJECT_1=PROJECT_ID_1
 export LOCATION_1=CLUSTER_LOCATION_1
@@ -33,7 +34,6 @@ export LOCATION_2=CLUSTER_LOCATION_2
 export CLUSTER_2=CLUSTER_NAME_2
 export CTX_2="gke_${PROJECT_2}_${LOCATION_2}_${CLUSTER_2}"
 ```
-# Before you begin
 Optional: Configure kubectl to point to the cluster
 ```bash
 gcloud container clusters get-credentials CLUSTER_NAME \
